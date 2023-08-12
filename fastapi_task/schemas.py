@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 import secrets
 from datetime import datetime, timedelta
+from pydantic import BaseModel
 
 # Pydantic schemas
 class UserSignup(BaseModel):
