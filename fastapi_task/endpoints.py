@@ -1,42 +1,50 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Security
 from cachetools import TTLCache
 import secrets
+
+from typing import List
+
+from fastapi.security import SecurityScopes, OAuth2PasswordBearer
+
 from schemas import Token, Post, UserLogin, UserSignup
-from main import app
-
-
+from fastapi import APIRouter
+api_router = APIRouter()
 # In-memory storage for users and posts
 users_db = {}
 posts_db = {}
+access_tokens = []
 post_id_counter = 1
 
 # Cache for user posts
 post_cache = TTLCache(maxsize=100, ttl=300)
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
 # Authentication dependency
-def authenticate_user(token: str = Depends(Token)):
+def authenticate_user(token: Token = Depends(Token)):
     if token.access_token not in users_db:
         raise HTTPException(status_code=401, detail="Invalid token")
     return token.access_token
 
+
 # Endpoints
-@app.post("/signup")
+@api_router.post("/signup")
 def signup(user: UserSignup):
     if user.username in users_db:
         raise HTTPException(status_code=400, detail="Username already taken")
     users_db[user.username] = user.password
     return {"message": "User registered successfully"}
 
-@app.post("/login", response_model=Token)
+@api_router.post("/login", response_model=Token)
 def login(user: UserLogin):
     if user.username not in users_db or users_db[user.username] != user.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     access_token = secrets.token_urlsafe(32)
-    users_db[user.username] = access_token
+    users_db[access_token] = user.username
     return {"access_token": access_token}
 
-@app.post("/addPost")
-def add_post(post: Post, token: str = Depends(authenticate_user)):
+@api_router.post("/addPost")
+def add_post(post: Post, token=Depends(authenticate_user)):
     global post_id_counter
     if len(post.content.encode('utf-8')) > 1024 * 1024:
         raise HTTPException(status_code=400, detail="Payload size exceeded")
@@ -49,7 +57,7 @@ def add_post(post: Post, token: str = Depends(authenticate_user)):
     post_id_counter += 1
     return {"postID": post_id}
 
-@app.get("/getPosts")
+@api_router.get("/getPosts", response_model=List[Post])
 def get_posts(token: str = Depends(authenticate_user)):
     cached_posts = post_cache.get(token)
     if cached_posts:
@@ -58,7 +66,7 @@ def get_posts(token: str = Depends(authenticate_user)):
     post_cache[token] = user_posts
     return user_posts
 
-@app.delete("/deletePost")
+@api_router.delete("/deletePost")
 def delete_post(postID: str, token: str = Depends(authenticate_user)):
     if postID not in posts_db:
         raise HTTPException(status_code=404, detail="Post not found")
