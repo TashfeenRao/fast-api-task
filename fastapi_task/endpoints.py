@@ -16,12 +16,18 @@ access_tokens = []
 post_id_counter = 1
 
 # Cache for user posts
-post_cache = TTLCache(maxsize=100, ttl=300)
+post_cache = TTLCache(maxsize=100, ttl=5000)
+user_cache = TTLCache(maxsize=100, ttl=5000)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Authentication dependency
-def authenticate_user(token: Token = Depends(Token)):
+def authenticate_user(security_scopes: SecurityScopes,
+                      token: Token = Depends(Token)):
+    app_scopes = ["add_post", "get_post"]
+    for scope in security_scopes.scopes:
+        if scope not in app_scopes:
+            raise HTTPException(status_code=401, detail="not has permission")
     if token.access_token not in users_db:
         raise HTTPException(status_code=401, detail="Invalid token")
     return token.access_token
@@ -41,6 +47,7 @@ def login(user: UserLogin):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     access_token = secrets.token_urlsafe(32)
     users_db[access_token] = user.username
+    user_cache[user.username] = user.username
     return {"access_token": access_token}
 
 @api_router.post("/addPost")
@@ -58,7 +65,9 @@ def add_post(post: Post, token=Depends(authenticate_user)):
     return {"postID": post_id}
 
 @api_router.get("/getPosts", response_model=List[Post])
-def get_posts(token: str = Depends(authenticate_user)):
+def get_posts(token: str = Security(
+        dependency=authenticate_user, scopes=["get_post"]
+    )):
     cached_posts = post_cache.get(token)
     if cached_posts:
         return cached_posts
